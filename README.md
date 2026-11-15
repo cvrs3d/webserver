@@ -1,100 +1,88 @@
-# Simple WebServer
+# Python HTTP Server
 
-## Overview
+A small HTTP server built directly with Python sockets and threads. The project explores how a TCP byte stream becomes an HTTP request, how responses are framed, and how concurrent requests share application state.
 
-This test mini-project is made to work with socket library and better understand how TCP and HTTP work.
+This is an educational implementation with partial HTTP/1.1 support.
 
-## Features
+## Implemented behavior
 
-- HTTP/1.1 request parsing using Python sockets
-- Dynamic HTTP response generation with status codes and headers
-- URL routing with GET and POST methods
-- JSON serialization and deserialization
-- Request validation and error handling
-- Concurrent client handling using Python threads
-- Thread-safe in-memory user storage using `threading.Lock`
-- Unit, integration, and concurrency tests with pytest
+- Reads headers and a `Content-Length` body, including bodies split across TCP reads.
+- Routes GET and POST requests and returns HTTP status lines, headers, and response bodies.
+- Validates JSON user creation requests and returns `400` for handled client errors.
+- Returns `404` for unknown routes and `405` with an `Allow` header for unsupported methods.
+- Uses one thread per connection and a lock around the in-memory user list.
+- Limits headers to 16 KiB and request bodies to 1 MiB; client sockets use a five-second timeout.
+- Closes the connection after each response.
 
-## Architecture 
+## Request handling
 
-TCP Client
-    |
-    v
-main() → socket.accept()
-    |
-    v
-threading.Thread()
-    |
-    v
-handle_client()
-    |
-    v
-read_http_req()
-    |
-    v
-parse_http_request()
-    |
-    +--> read_http_body()
-    |
-    v
-route_request()
-    |
-    +--> api_users()
-    |
-    v
-build_http_response()
-    |
-    v
-socket.sendall()
-    |
-    v
-TCP Client
+`main()` accepts connections and starts a thread running `handle_client()`. Each handler parses one request, routes it, and sends the response.
 
-## API Endpoints
+| Stage | Functions | Responsibility |
+| --- | --- | --- |
+| Read and parse | `read_http_req`, `parse_http_request`, `read_http_body` | Collect headers and body from the TCP stream |
+| Route and execute | `route_request`, `api_users` | Validate the route, method, and JSON payload; access shared state |
+| Respond | `build_http_response`, `handle_client` | Encode status/headers/body and send the response |
 
-| Method | Endpoint | Description | Status |
-|---|---|---|---:|
-| GET | `/` | Welcome message | 200 |
-| GET | `/health` | Health check | 200 |
-| GET | `/users` | Retrieve all users | 200 |
-| POST | `/users` | Create a user | 201 |
+## Run locally
 
-## POST Example 
-Request:
+Use Python 3.10 or newer. The server itself uses only the standard library.
+
 ```bash
-curl -X POST http://127.0.0.1:8888/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Alice"}'
+git clone https://github.com/cvrs3d/webserver.git
+cd webserver
+python3 -m venv .venv
+source .venv/bin/activate
+python webserver1.py
 ```
-Respponse:
+
+The server listens on `127.0.0.1:8888`. Run the following examples in another terminal.
+
+## API
+
+| Method | Path | Response |
+| --- | --- | --- |
+| GET | `/` | `200`, plain-text welcome message |
+| GET | `/health` | `200`, plain-text `OK` |
+| GET | `/users` | `200`, JSON object containing the user list |
+| POST | `/users` | `201`, JSON object containing the new user |
+
 ```bash
+curl -i http://127.0.0.1:8888/health
+
+curl -i -X POST http://127.0.0.1:8888/users \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alice"}'
+
+curl -i http://127.0.0.1:8888/users
+```
+
+The POST response body on a fresh server is:
+
+```json
 {"id": 1, "name": "Alice"}
 ```
 
+`name` must be a string containing at least one non-whitespace character. User IDs are allocated from the in-memory list and restart when the process restarts.
 
-## Getting Started 
+## Tests
 
-# Clone repository
-git clone <repository-url>
-cd web-server
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Run server
-python webserver1.py
-
-## Testing 
+With the virtual environment active:
 
 ```bash
+python -m pip install pytest
 python -m pytest -v
-python -m pytest --collect-only -q 
 ```
+
+The tests start their own local socket listeners; a separately running server is not required.
+
+- `test_server.py`: response encoding, routing, and user validation.
+- `test_integration.py`: real TCP requests, a fragmented request body, and concurrent creation of 50 users.
+- `conftest.py`: isolated user state and ephemeral-port listeners.
 
 ## Limitations
 
-- Thread-per-connection architecture has no limit on the number of concurrent threads.
-- HTTP/1.1 support is partial; persistent connections and chunked transfer encoding are not implemented.
-- User data is stored in memory without persistence.
-- The server is intended for educational purposes, not production deployment.
+- Thread creation is unbounded; there is no worker pool or admission control.
+- Keep-alive, chunked transfer encoding, TLS, and complete HTTP validation are not implemented.
+- User data is stored only in memory.
+- The server is intended for local learning and experiments, not production deployment.
